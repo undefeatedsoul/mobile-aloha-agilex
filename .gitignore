@@ -1,0 +1,49 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Robot recordings and experiment outputs (keep source scripts)
+/monitor/datas/
+/monitor/videos/
+/data/
+/datasets/
+/checkpoints/
+/outputs/
+/logs/
+*.log
+*.bag
+*.bag.active
+*.db3
+*.mcap
+*.hdf5
+*.h5
+*.pt
+*.pth
+*.safetensors
+
+# Machine-specific credentials and tool state
+.env
+.env.*
+!.env.example
+/.aws/
+/.codex/
+/.agents/
+
+# Editor and OS metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
