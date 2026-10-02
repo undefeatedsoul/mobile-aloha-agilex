@@ -13,10 +13,8 @@ import numpy as np
 from mobile_aloha_agilex import constants
 from mobile_aloha_agilex import robot_utils
 
-try:
-    from mobile_aloha_agilex.monitor import monitor_joints_left_mit as _timeline_monitor
-except Exception:
-    _timeline_monitor = None
+# The legacy left-arm recording tool has been removed; recording stays disabled.
+_timeline_monitor = None
 
 # MIT控制模式支持
 try:
