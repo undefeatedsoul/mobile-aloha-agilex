@@ -1,7 +1,8 @@
 """
-Script to convert Aloha hdf5 data to the LeRobot dataset v2.0 format.
+Auxiliary tool to convert Aloha hdf5 data to the historical LeRobot v2.0 API.
+Not part of the robot inference runtime; requires a separate data-tool environment.
 
-Example usage: uv run examples/aloha_real/convert_aloha_data_to_lerobot.py --raw-dir /path/to/raw/data --repo-id <org>/<dataset-name>
+Example usage: python convert_aloha_data_to_lerobot.py --raw-dir /path/to/raw/data --repo-id <org>/<dataset-name>
 """
 
 import dataclasses

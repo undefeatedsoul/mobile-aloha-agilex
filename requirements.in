@@ -1,3 +1,5 @@
+# Historical ALOHA environment input; retained for reference only.
+# Install the pi runtime from pyproject.toml and the local openpi-client package.
 Pillow
 dm_control
 einops

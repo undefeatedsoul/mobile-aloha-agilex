@@ -1,126 +1,160 @@
-# Run Aloha (Real Robot)
+# AgileX 双臂 pi 真机推理客户端
 
-This example demonstrates how to run with a real robot using an [ALOHA setup](https://github.com/tonyzhaozh/aloha). See [here](../../docs/remote_inference.md) for instructions on how to load checkpoints and run inference. We list the relevant checkpoint paths for each provided fine-tuned model below.
+本仓库维护松灵双臂真机的同步远程 pi 推理执行代码。模型权重与推理服务部署在远端；本机采集三路相机和双臂状态，通过 WebSocket 请求动作 Chunk，再逐步提交给现有真机执行层。
 
-## Prerequisites
+当前只保留 pi 图像处理路径和同步推理。整理以初始提交 `854dc3f` 为行为基线，没有修改 ROS/CAN 控制算法，也没有修复下文列出的已知问题。
 
-This repo uses a fork of the ALOHA repo, with very minor modifications to use Realsense cameras.
+## 安装
 
-1. Follow the [hardware installation instructions](https://github.com/tonyzhaozh/aloha?tab=readme-ov-file#hardware-installation) in the ALOHA repo.
-1. Modify the `third_party/aloha/aloha_scripts/realsense_publisher.py` file to use serial numbers for your cameras.
-
-## With Docker
+使用 Python 3.10，推荐在仓库内建立虚拟环境并使用可编辑安装：
 
 ```bash
-export SERVER_ARGS="--env ALOHA --default_prompt='take the toast out of the toaster'"
-docker compose -f examples/aloha_real/compose.yml up --build
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ./packages/openpi-client
+python -m pip install -e .
 ```
 
-## Without Docker
-
-Terminal window 1:
+也可以使用已有的 uv：
 
 ```bash
-# Create virtual environment
-uv venv --python 3.10 examples/aloha_real/.venv
-source examples/aloha_real/.venv/bin/activate
-uv pip sync examples/aloha_real/requirements.txt
-uv pip install -e packages/openpi-client
-
-# Run the robot
-python -m examples.aloha_real.main
+uv venv --python 3.10 .venv
+source .venv/bin/activate
+uv pip install -e ./packages/openpi-client
+uv pip install -e .
 ```
 
-Terminal window 2:
+先安装仓库内的 `openpi-client`，再安装主项目，确保使用本仓库验证过的同步 Broker。不要用上层 openpi 工程的另一个客户端替代它。
+
+主项目依赖按整理前虚拟环境中实际使用的版本声明。ROS 和硬件 SDK 需要沿用真机已经验证过的安装环境：
+
+- ROS 1 的 `rospy`、`sensor_msgs`、`geometry_msgs`、`nav_msgs`、`std_msgs` 和 `cv_bridge`。
+- 与当前控制代码兼容的 Piper SDK；优先使用 `C_PiperInterface_V2`，代码保留旧接口回退。
+- 在运行 shell 中加载 ROS 及机器人工作空间的 setup，使上述模块能被当前 Python 解释器导入。ROS 的 Python ABI 必须与解释器兼容，仅加载 setup 不能消除版本不匹配。
+- 已启动的相机节点；位置控制还需要机器人 ROS 状态和指令节点，MIT 控制需要已经配置的 CAN 接口。
+
+不要为此次整理升级真机 SDK、固件或 ROS 环境。安装和查看 CLI 帮助本身不连接服务器、不初始化 ROS、不使能机械臂。
+
+`requirements.in`、`requirements.txt` 和 `uv.lock` 保留为历史 ALOHA 环境参考，不是当前安装来源。请使用上述 pip/uv pip 命令，不使用该历史锁文件执行 `uv sync` 或 `uv run`。
+
+## 启动
+
+安装后可以在任意工作目录使用模块或命令入口：
 
 ```bash
-roslaunch aloha ros_nodes.launch
+python -m mobile_aloha_agilex.main --help
+agilex-infer --help
 ```
 
-Terminal window 3:
+在仓库根目录也可以运行 `python main.py --help`。三种入口使用相同的参数和实现。
+
+位置控制：
 
 ```bash
-uv run scripts/serve_policy.py --env ALOHA --default_prompt='take the toast out of the toaster'
+agilex-infer --host SERVER_IP --port 8000 --control-mode position --action-horizon 30
 ```
 
-## **ALOHA Checkpoint Guide**
+MIT 控制：
 
+```bash
+agilex-infer --host SERVER_IP --port 8000 --control-mode mit \
+  --can-port-left can_left --can-port-right can_right \
+  --mit-kp 10.0 --mit-kd 0.8 --action-horizon 30
+```
 
-The `pi0_base` model can be used in zero shot for a simple task on the ALOHA platform, and we additionally provide two example fine-tuned checkpoints, “fold the towel” and “open the tupperware and put the food on the plate,” which can perform more advanced tasks on the ALOHA.
+执行启动命令会连接模型服务器，随后初始化机器人，并在 episode 开始时执行现有复位流程。正常完成所有 episode 后，Runtime 再复位一次；异常退出沿用原有环境关闭流程。
 
-While we’ve found the policies to work in unseen conditions across multiple ALOHA stations, we provide some pointers here on how best to set up scenes to maximize the chance of policy success. We cover the prompts to use for the policies, objects we’ve seen it work well on, and well-represented initial state distributions. Running these policies in zero shot is still a very experimental feature, and there is no guarantee that they will work on your robot. The recommended way to use `pi0_base` is by finetuning with data from the target robot.
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `--host` / `--port` | `10.19.134.58` / `8000` | 远端 pi WebSocket 服务 |
+| `--action-horizon` | `30` | 每个 Chunk 实际执行的步数 |
+| `--control-mode` | `position` | ROS 位置控制或 `mit` SDK/CAN 控制 |
+| `--can-port-left` / `--can-port-right` | `can_left` / `can_right` | 双臂 CAN 接口 |
+| `--mit-kp` / `--mit-kd` | `10.0` / `0.8` | MIT 增益 |
+| `--num-episodes` | `1` | episode 数量 |
+| `--max-episode-steps` | `10000` | 原有 Runtime 的步数限制参数，见已知问题 |
 
+执行循环频率上限保留为 30 Hz。同步模式执行完指定步数后阻塞请求下一段动作，Chunk 之间存在网络和模型推理等待，实际频率可能更低。
 
----
+旧的 `--async-infer`、`--trigger-step`、`--blend-window` 已移除，旧异步启动命令需要删除这些参数。原 `examples.mobile_aloha_AgileX` 导入路径改为 `mobile_aloha_agilex`。
 
-### **Toast Task**  
+推理入口的记录功能也暂时移除：不再支持 `--record`、`--record-rate`、`--record-file`。旧命令需要删除这些参数，启动和退出不会自动保存关节记录或绘图。
 
-This task involves the robot taking two pieces of toast out of a toaster and placing them on a plate.  
+## 模型接口
 
-- **Checkpoint path**: `s3://openpi-assets/checkpoints/pi0_base`
-- **Prompt**: "take the toast out of the toaster"
-- **Objects needed**: Two pieces of toast, a plate, and a standard toaster.  
-- **Object Distribution**:  
-  - Works on both real toast and rubber fake toast  
-  - Compatible with standard 2-slice toasters  
-  - Works with plates of varying colors  
+所有 pi 系列服务使用同一套客户端协议；客户端不根据 metadata 的模型名称选择预处理，也不检查模型名称。服务端需要与以下现有接口兼容。
 
-### **Scene Setup Guidelines**
-<img width="500" alt="Screenshot 2025-01-31 at 10 06 02 PM" src="https://github.com/user-attachments/assets/3d043d95-9d1c-4dda-9991-e63cae61e02e" />
+建立连接后，服务器首先发送 MessagePack 编码的 metadata。客户端保留 metadata 日志及 `reset_pose` 传递；实际真机复位仍由执行层的硬编码左右臂姿态决定。
 
-- The toaster should be positioned in the top-left quadrant of the workspace.  
-- Both pieces of toast should start inside the toaster, with at least 1 cm of bread sticking out from the top.  
-- The plate should be placed roughly in the lower-center of the workspace.  
-- Works with both natural and synthetic lighting, but avoid making the scene too dark (e.g., don't place the setup inside an enclosed space or under a curtain).  
+每次推理请求：
 
+- `state`：14 维双臂位置，顺序为左臂六关节、左夹爪、右臂六关节、右夹爪。
+- `images`：`cam_high`、`cam_left_wrist`、`cam_right_wrist` 三路图像。
+- 图像沿用 `resize_with_pad → uint8 → CHW`，默认尺寸 `3×224×224`；深度字段被移除。
+- 不额外发送 prompt、速度观测或 effort，也不改变 ROS 原图的颜色通道顺序。
 
-### **Towel Task**  
+服务器返回 `actions: (H, 14)`，可选 `velocities: (H, 14)`。H 必须不少于 `action_horizon`。同步 Broker 执行前 `action_horizon` 步后请求新 Chunk；返回的 Chunk 更长时，其余步骤不执行。
 
-This task involves folding a small towel (e.g., roughly the size of a hand towel) into eighths.
+位置控制只传位置；MIT 模式保留可选速度透传，没有速度时沿用执行层默认处理。MIT 夹爪按米处理，ROS 路径仍直接透传原值，本次未统一单位。
 
-- **Checkpoint path**: `s3://openpi-assets/checkpoints/pi0_aloha_towel`
-- **Prompt**: "fold the towel"  
-- **Object Distribution**:  
-  - Works on towels of varying solid colors 
-  - Performance is worse on heavily textured or striped towels 
+## 独立监控工具
 
-### **Scene Setup Guidelines**  
-<img width="500" alt="Screenshot 2025-01-31 at 10 01 15 PM" src="https://github.com/user-attachments/assets/9410090c-467d-4a9c-ac76-96e5b4d00943" />
+推理入口不再传递记录配置，底层记录实现保持关闭。`monitor/` 中的独立工具和已有数据仍保留，便于以后扩展双臂记录；目前没有自动记录双臂的功能。
 
-- The towel should be flattened and roughly centered on the table.  
-- Choose a towel that does not blend in with the table surface.  
+需要独立视频录制时另开终端：
 
+```bash
+python -m mobile_aloha_agilex.monitor.monitor_camera record
+```
 
-### **Tupperware Task**  
+默认视频写入 `monitor/videos/`。监控工具也保留脚本入口，具体参数查看各脚本帮助。
 
-This task involves opening a tupperware filled with food and pouring the contents onto a plate.  
+`convert_aloha_data_to_lerobot.py` 是历史 LeRobot v2.0 数据转换辅助脚本，需要单独配置匹配其 API 的 LeRobot、Torch、h5py 等环境；推理安装不包含训练框架。
 
-- **Checkpoint path**: `s3://openpi-assets/checkpoints/pi0_aloha_tupperware`
-- **Prompt**: "open the tupperware and put the food on the plate"
-- **Objects needed**: Tupperware, food (or food-like items), and a plate.  
-- **Object Distribution**:  
-  - Works on various types of fake food (e.g., fake chicken nuggets, fries, and fried chicken).  
-  - Compatible with tupperware of different lid colors and shapes, with best performance on square tupperware with a corner flap (see images below).  
-  - The policy has seen plates of varying solid colors.  
+## 代码职责与维护
 
-### **Scene Setup Guidelines** 
-<img width="500" alt="Screenshot 2025-01-31 at 10 02 27 PM" src="https://github.com/user-attachments/assets/60fc1de0-2d64-4076-b903-f427e5e9d1bf" />
+| 内容 | 职责 |
+|---|---|
+| `main.py` | CLI、同步推理组件组装与运行 |
+| `env.py` | pi 观测预处理及模型动作到执行层的适配 |
+| `real_env.py`、`robot_utils.py`、`mit_controller.py`、`constants.py` | 原有真机执行与 ROS/CAN 交互 |
+| `packages/openpi-client/` | 同步分块、传输、序列化和 Runtime |
+| `monitor/` | 关节与相机监控工具；按需导入，不在包导入时启动 |
+| `tests/` | 离线行为对照、接口和入口验证 |
 
-- Best performance observed when both the tupperware and plate are roughly centered in the workspace.  
-- Positioning:  
-  - Tupperware should be on the left.  
-  - Plate should be on the right or bottom.  
-  - The tupperware flap should point toward the plate.  
+硬件层仍保留部分未参与推理的旧函数和 RDT 配置，此次仅修改必要导入。`new/` 重复实现、异步 Broker、旧 ALOHA Docker/compose 和未接入的显示器已移除，历史内容可以从提交 `854dc3f` 恢复。
 
-## Training on your own Aloha dataset
+虚拟环境、实验录制数据、视频、模型权重和缓存由 Git 忽略，整理没有删除已有实验数据。目录是独立 Git 仓库，维护时在这里提交；上层工程不会自动记录本仓库内部修改。
 
-1. Convert the dataset to the LeRobot dataset v2.0 format. 
-    
-    We provide a script [convert_aloha_data_to_lerobot.py](./convert_aloha_data_to_lerobot.py) that converts the dataset to the LeRobot dataset v2.0 format. As an example we have converted the `aloha_pen_uncap_diverse_raw` dataset from the [BiPlay repo](https://huggingface.co/datasets/oier-mees/BiPlay/tree/main/aloha_pen_uncap_diverse_raw) and uploaded it to the HuggingFace Hub as [physical-intelligence/aloha_pen_uncap_diverse](https://huggingface.co/datasets/physical-intelligence/aloha_pen_uncap_diverse). 
+## 离线验证
 
+```bash
+python -m pip install -e '.[dev]'
+python -m pytest -q
+```
 
-2. Define a training config that uses the custom dataset. 
+默认只收集 `tests/` 和客户端测试。测试使用固定图像、假策略和替身环境，不连接实际机器人。
 
-    We provide the [pi0_aloha_pen_uncap config](../../src/openpi/training/config.py) as an example. You should refer to the root [README](../../README.md) for how to run training with the new config.
- 
-IMPORTANT: Our base checkpoint includes normalization stats from various common robot configurations. When fine-tuning a base checkpoint with a custom dataset from one of these configurations, we recommend using the corresponding normalization stats provided in the base checkpoint. In the example, this is done by specifying the trossen asset_id and a path to the pretrained checkpoint’s asset directory within the AssetsConfig.
+行为对照测试以 Git 中的 `854dc3f` 为基线；没有该提交历史的源码副本会跳过相关对照测试。真机控制文件去除导入后的 AST 必须与基线一致，同步 Broker、WebSocket 和 Runtime 实现必须保持一致。
+
+如果本机已安装 uv 且所需依赖已缓存，可以额外运行独立安装检查：
+
+```bash
+python tests/check_standalone.py
+```
+
+该检查将源码复制到临时目录，离线建立全新虚拟环境，验证无上层工程和硬件依赖时的包导入及三种帮助入口；结束后自动移除临时环境，不连接机器人。
+
+## 后续待修复问题
+
+本次等价整理保留以下行为：
+
+1. 同步 Broker 未校验 Chunk 长度、动作维度或 NaN/Inf；短 Chunk 可能在部分动作执行后越界。
+2. metadata 和推理响应接收没有超时；只有连接被拒绝时持续重试，其他连接异常直接传播。
+3. WebSocket 没有显式关闭接口，初始化失败时的资源清理仍不完整。
+4. 观测预处理原地删除深度字段并替换图像；重复处理同一份观测可能出错。
+5. Runtime 的步数限制可能比指定值多执行一步。
+6. 服务器 `reset_pose` 未用于实际复位；ROS 与 MIT 夹爪单位没有统一。
+7. MIT 指令失败返回值、使能状态和读状态失败的处理沿用现有代码。
+
+这些项目应作为后续单独修复和真机验收任务，不能用本次离线测试结果替代实际设备验证。

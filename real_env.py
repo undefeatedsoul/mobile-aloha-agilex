@@ -10,17 +10,17 @@ import dm_env
 # from interbotix_xs_msgs.msg import JointSingleCommand
 import numpy as np
 
-from examples.mobile_aloha_AgileX import constants
-from examples.mobile_aloha_AgileX import robot_utils
+from mobile_aloha_agilex import constants
+from mobile_aloha_agilex import robot_utils
 
 try:
-    from monitor import monitor_joints_left_mit as _timeline_monitor
+    from mobile_aloha_agilex.monitor import monitor_joints_left_mit as _timeline_monitor
 except Exception:
     _timeline_monitor = None
 
 # MIT控制模式支持
 try:
-    from examples.mobile_aloha_AgileX.mit_controller import (
+    from mobile_aloha_agilex.mit_controller import (
         DualArmMITController, 
         MITControlConfig
     )

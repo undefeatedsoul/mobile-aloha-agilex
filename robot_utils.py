@@ -13,7 +13,7 @@ import numpy as np
 import rospy
 from sensor_msgs.msg import JointState
 
-from examples.mobile_aloha_AgileX import constants
+from mobile_aloha_agilex import constants
 import argparse
 import sys
 import threading
